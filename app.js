@@ -7,7 +7,7 @@ const API_MODELS = {
     'gemini-3-pro': 'https://hub.malson.eu/api/products/deepseek_ai/chat/completions/google/gemini-3-pro'
 };
 
-let selectedModel = 'gpt-5.1-thinking';
+let selectedModel = 'gpt-4o';
 
 const firebaseConfig = {
     apiKey: "AIzaSyBIPiJTeJ94kMvYo6AfoTTytNKxQWmysHE",
@@ -390,12 +390,93 @@ function loadConversation(id) {
     messagesContainer.innerHTML = '';
 
     conversation.messages.forEach(msg => {
-        appendMessage(msg.role, msg.content, msg.attachments, false);
+        appendMessage(msg.role, msg.content, msg.attachments, false, msg.thinking);
     });
 
     renderChatHistory();
     closeSidebar();
     scrollToBottom();
+}
+
+/* ... skipped helper functions ... */
+
+function appendMessage(role, content, attachments = [], animate = true, thinking = null) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role}`;
+    if (!animate) messageDiv.style.animation = 'none';
+
+    const avatarIcon = role === 'user'
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>'
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>';
+
+    let attachmentsHtml = '';
+    if (attachments && attachments.length > 0) {
+        attachmentsHtml = '<div class="message-attachments">';
+        attachments.forEach(att => {
+            if (att.type === 'image') {
+                attachmentsHtml += `<img src="${att.url}" alt="Görsel" class="message-image" onclick="window.open('${att.url}', '_blank')">`;
+            } else if (att.type === 'audio') {
+                attachmentsHtml += `<audio controls src="${att.url}" class="message-audio"></audio>`;
+            }
+        });
+        attachmentsHtml += '</div>';
+    }
+
+    let thinkingHtml = '';
+    if (thinking) {
+        thinkingHtml = `
+            <div class="message-thinking">
+                <div class="thinking-header" onclick="toggleThinking(this)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 12h20M2 12l5-5m-5 5l5 5"></path>
+                    </svg>
+                    <span>Düşünce Süreci</span>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+                <div class="thinking-content hidden">
+                    ${parseMarkdown(thinking)}
+                </div>
+            </div>
+        `;
+    }
+
+    const initialContent = role === 'assistant' ? '' : parseMarkdown(content);
+
+    messageDiv.innerHTML = `
+        <div class="message-content">
+            <div class="message-avatar">${avatarIcon}</div>
+            <div class="message-body">
+                ${attachmentsHtml}
+                ${thinkingHtml}
+                <div class="message-text">${initialContent}</div>
+            </div>
+        </div>
+    `;
+
+    addMessageActions(messageDiv);
+
+    messagesContainer.appendChild(messageDiv);
+
+    // Handle animation or content rendering
+    if (role === 'assistant') {
+        if (animate && content) {
+            typewriterEffect(messageDiv.querySelector('.message-text'), content);
+        } else {
+            // Render static content
+            const textDiv = messageDiv.querySelector('.message-text');
+            textDiv.innerHTML = parseMarkdown(content);
+
+            // Highlight code blocks if any
+            textDiv.querySelectorAll('pre code').forEach(block => {
+                hljs.highlightElement(block);
+            });
+            addCodeCopyButtons(textDiv);
+        }
+    }
+
+    return messageDiv;
 }
 
 function generateId() {
@@ -658,8 +739,11 @@ async function sendMessage() {
         // Build prompt from conversation history (now includes image URLs)
         let prompt = buildPrompt(conversation.messages);
 
-        // Call API with selected model
+        // Call API with selected model (30 second timeout)
         const apiUrl = API_MODELS[selectedModel];
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
@@ -669,29 +753,33 @@ async function sendMessage() {
                 prompt: prompt
             }),
             redirect: 'follow',
-            mode: 'cors'
+            mode: 'cors',
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             throw new Error(`API Error: ${response.status}`);
         }
 
         const text = await response.text();
-        const assistantMessage = parseSSEResponse(text);
+        const responseData = parseSSEResponse(text);
 
         typingIndicator.remove();
 
-        if (assistantMessage) {
+        if (responseData && (responseData.content || responseData.thinking)) {
             const aiMessage = {
                 role: 'assistant',
-                content: assistantMessage,
+                content: responseData.content,
+                thinking: responseData.thinking,
                 attachments: []
             };
             conversation.messages.push(aiMessage);
             await saveConversation(conversation);
             renderChatHistory();
 
-            appendMessage('assistant', assistantMessage, []);
+            appendMessage('assistant', responseData.content, [], true, responseData.thinking);
             scrollToBottom();
         } else {
             throw new Error('Yanıt boş geldi');
@@ -703,7 +791,12 @@ async function sendMessage() {
         console.error('API URL:', API_MODELS[selectedModel]);
         typingIndicator.remove();
 
-        const errorMessage = `Üzgünüm, ${selectedModel} modelinde bir hata oluştu: ${error.message}`;
+        let errorMessage;
+        if (error.name === 'AbortError') {
+            errorMessage = `⏱️ İstek zaman aşımına uğradı. Lütfen tekrar deneyin veya daha hızlı bir model seçin.`;
+        } else {
+            errorMessage = `Üzgünüm, ${selectedModel} modelinde bir hata oluştu: ${error.message}`;
+        }
         appendMessage('assistant', errorMessage, []);
 
         conversation.messages.pop();
@@ -719,36 +812,54 @@ async function sendMessage() {
 function parseSSEResponse(text) {
     const lines = text.split('\n');
     let contentParts = [];
+    let thinkingParts = [];
     let isContentEvent = false;
+    let isThinkingEvent = false;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
         if (line === 'event: content') {
             isContentEvent = true;
+            isThinkingEvent = false;
             continue;
         }
 
-        if (isContentEvent && line.startsWith('data: ')) {
+        if (line === 'event: thinking' || line === 'event: reasoning') {
+            isThinkingEvent = true;
+            isContentEvent = false;
+            continue;
+        }
+
+        if ((isContentEvent || isThinkingEvent) && line.startsWith('data: ')) {
             try {
                 const data = line.substring(6);
                 if (!data.includes('<START_STREAMING_SSE>') && !data.includes('<END_STREAMING_SSE>') && !data.includes('{')) {
                     const parsed = JSON.parse(data);
                     if (typeof parsed === 'string') {
-                        contentParts.push(parsed);
+                        if (isThinkingEvent) {
+                            thinkingParts.push(parsed);
+                        } else {
+                            contentParts.push(parsed);
+                        }
                     }
                 }
             } catch (e) {
                 // Not valid JSON, skip
             }
-            isContentEvent = false;
+            // Flagleri sıfırlama! Bir sonraki event gelene kadar devam etmeli.
+            // isContentEvent = false;
+            // isThinkingEvent = false;
         }
     }
 
     let fullContent = contentParts.join('');
-    fullContent = fixTurkishEncoding(fullContent);
+    let fullThinking = thinkingParts.join('');
 
-    return fullContent;
+    fullContent = fixTurkishEncoding(fullContent);
+    fullThinking = fixTurkishEncoding(fullThinking);
+
+    return { content: fullContent, thinking: fullThinking };
 }
 
 // ===== Fix Turkish Character Encoding =====
@@ -779,7 +890,154 @@ function fixTurkishEncoding(text) {
     return fixed;
 }
 
-function appendMessage(role, content, attachments = [], animate = true) {
+
+// ===== Markdown Parser =====
+function parseMarkdown(text) {
+    if (!text) return '';
+
+    // If marked is available (via CDN), use it
+    if (typeof marked !== 'undefined') {
+        return marked.parse(text);
+    }
+
+    // Fallback: Simple parser
+    let html = text
+        // Code blocks
+        .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+        .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+        // Inline code
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        // Bold
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        // Italic
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        // Links
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+        // Newlines to br (but not in pre)
+        .replace(/\n/g, '<br>');
+
+    // Clean up br inside pre (simple fix)
+    html = html.replace(/<pre>(.*?)<\/pre>/gs, (match) => {
+        return match.replace(/<br>/g, '\n');
+    });
+
+    return html;
+}
+
+// ===== Typewriter Effect =====
+async function typewriterEffect(element, text) {
+    // If text contains code blocks, render immediately to avoid formatting issues
+    if (text.includes('```') || text.includes('`')) {
+        element.innerHTML = parseMarkdown(text);
+        element.querySelectorAll('pre code').forEach(block => {
+            hljs.highlightElement(block);
+        });
+        return;
+    }
+
+    element.innerHTML = '';
+    const cursor = document.createElement('span');
+    cursor.className = 'typewriter-cursor';
+    element.appendChild(cursor);
+
+    const chars = text.split('');
+
+    for (let i = 0; i < chars.length; i++) {
+        const charNode = document.createTextNode(chars[i]);
+        element.insertBefore(charNode, cursor);
+
+        if (i % 3 === 0) scrollToBottom();
+
+        // slightly slower on punctuation
+        const delay = ['.', '!', '?', '\n'].includes(chars[i]) ? 20 : 5;
+        await new Promise(r => setTimeout(r, delay));
+    }
+
+    cursor.remove();
+    element.innerHTML = parseMarkdown(text);
+
+    // Add code highlight and copy buttons
+    element.querySelectorAll('pre code').forEach(block => {
+        hljs.highlightElement(block);
+    });
+    addCodeCopyButtons(element);
+}
+
+function addCodeCopyButtons(element) {
+    element.querySelectorAll('pre').forEach((pre) => {
+        if (pre.querySelector('.code-header')) return;
+
+        const codeBlock = pre.querySelector('code');
+        const lang = codeBlock ? (codeBlock.className.replace('language-', '') || 'code') : 'code';
+
+        const header = document.createElement('div');
+        header.className = 'code-header';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-btn';
+        copyBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            Kopyala
+        `;
+
+        copyBtn.addEventListener('click', async () => {
+            const text = codeBlock ? codeBlock.innerText : pre.innerText;
+            await navigator.clipboard.writeText(text);
+
+            const originalHtml = copyBtn.innerHTML;
+            copyBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                Kopyalandı!
+            `;
+            setTimeout(() => {
+                copyBtn.innerHTML = originalHtml;
+            }, 2000);
+        });
+
+        header.innerHTML = `<span>${lang}</span>`;
+        header.appendChild(copyBtn);
+
+        pre.appendChild(header);
+    });
+}
+
+function addMessageActions(messageDiv) {
+    if (messageDiv.querySelector('.message-actions')) return;
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'message-actions';
+
+    // Copy Button (Message)
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'action-btn';
+    copyBtn.title = 'Mesajı Kopyala';
+    copyBtn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+    `;
+    copyBtn.onclick = async () => {
+        const textDiv = messageDiv.querySelector('.message-text');
+        // Get text without Thinking part if mostly
+        const text = textDiv ? textDiv.innerText : '';
+        await navigator.clipboard.writeText(text);
+
+        const originalHtml = copyBtn.innerHTML;
+        copyBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+        setTimeout(() => copyBtn.innerHTML = originalHtml, 2000);
+    };
+
+    actionsDiv.appendChild(copyBtn);
+    messageDiv.appendChild(actionsDiv);
+}
+
+function appendMessage(role, content, attachments = [], animate = true, thinking = null) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role}`;
     if (!animate) messageDiv.style.animation = 'none';
@@ -793,7 +1051,7 @@ function appendMessage(role, content, attachments = [], animate = true) {
         attachmentsHtml = '<div class="message-attachments">';
         attachments.forEach(att => {
             if (att.type === 'image') {
-                attachmentsHtml += `<img src="${att.url}" alt="Görsel" class="message-image">`;
+                attachmentsHtml += `<img src="${att.url}" alt="Görsel" class="message-image" onclick="window.open('${att.url}', '_blank')">`;
             } else if (att.type === 'audio') {
                 attachmentsHtml += `<audio controls src="${att.url}" class="message-audio"></audio>`;
             }
@@ -801,23 +1059,69 @@ function appendMessage(role, content, attachments = [], animate = true) {
         attachmentsHtml += '</div>';
     }
 
-    const formattedContent = formatMessage(content);
-    const hasContent = content && content.trim().length > 0;
+    let thinkingHtml = '';
+    if (thinking) {
+        thinkingHtml = `
+            <div class="message-thinking">
+                <div class="thinking-header" onclick="toggleThinking(this)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 12h20M2 12l5-5m-5 5l5 5"></path>
+                    </svg>
+                    <span>Düşünce Süreci</span>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+                <div class="thinking-content hidden">
+                    ${parseMarkdown(thinking)}
+                </div>
+            </div>
+        `;
+    }
+
+    const initialContent = role === 'assistant' ? '' : parseMarkdown(content);
 
     messageDiv.innerHTML = `
         <div class="message-content">
-            <div class="message-avatar">
-                ${avatarIcon}
-            </div>
+            <div class="message-avatar">${avatarIcon}</div>
             <div class="message-body">
                 ${attachmentsHtml}
-                ${hasContent ? `<div class="message-text">${formattedContent}</div>` : ''}
+                ${thinkingHtml}
+                <div class="message-text">${initialContent}</div>
             </div>
         </div>
     `;
 
+    addMessageActions(messageDiv);
+
     messagesContainer.appendChild(messageDiv);
+
+    // Handle animation or syntax highlighting
+    if (role === 'assistant' && animate && content) {
+        typewriterEffect(messageDiv.querySelector('.message-text'), content);
+    } else if (role === 'assistant' && !animate && content.includes('<pre><code')) {
+        const textDiv = messageDiv.querySelector('.message-text');
+        textDiv.innerHTML = parseMarkdown(content);
+        textDiv.querySelectorAll('pre code').forEach(block => {
+            hljs.highlightElement(block);
+        });
+        addCodeCopyButtons(textDiv);
+    } else if (role === 'assistant' && !animate) {
+        // Ensure plain text content is also rendered properly if not animating but no code
+        messageDiv.querySelector('.message-text').innerHTML = parseMarkdown(content);
+    }
+
+    return messageDiv;
 }
+
+window.toggleThinking = function (header) {
+    const content = header.nextElementSibling;
+    const chevron = header.querySelector('.chevron');
+    content.classList.toggle('hidden');
+    chevron.style.transform = content.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+};
+
+
 
 function appendTypingIndicator() {
     const indicatorDiv = document.createElement('div');
