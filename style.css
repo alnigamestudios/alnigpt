@@ -892,6 +892,29 @@ a:hover {
     animation: pulse 1s infinite;
 }
 
+@keyframes blink {
+
+    0%,
+    50% {
+        opacity: 1;
+    }
+
+    51%,
+    100% {
+        opacity: 0;
+    }
+}
+
+.typewriter-cursor {
+    display: inline-block;
+    width: 6px;
+    height: 14px;
+    background-color: var(--accent-color);
+    margin-left: 2px;
+    vertical-align: middle;
+    animation: blink 1s step-end infinite;
+}
+
 @keyframes pulse {
 
     0%,
@@ -1224,4 +1247,123 @@ a:hover {
 /* ===== Selection ===== */
 ::selection {
     background-color: rgba(16, 163, 127, 0.3);
+}
+
+/* ===== Thinking Block ===== */
+.message-thinking {
+    margin-bottom: 8px;
+    background-color: var(--bg-tertiary);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary);
+    user-select: none;
+    transition: background-color var(--transition-fast);
+}
+
+.thinking-header:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.thinking-header .chevron {
+    margin-left: auto;
+    transition: transform var(--transition-fast);
+}
+
+.thinking-content {
+    padding: 12px;
+    border-top: 1px solid var(--border-color);
+    font-size: 14px;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.thinking-content.hidden {
+    display: none;
+}
+
+/* ===== Message Actions & Code Copy ===== */
+.message {
+    position: relative;
+}
+
+.message:hover .message-actions {
+    opacity: 1;
+}
+
+.message-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.action-btn {
+    padding: 6px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+pre {
+    position: relative;
+    padding: 2.5rem 1rem 1rem;
+}
+
+.code-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+.copy-btn {
+    background: transparent;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.copy-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
 }
