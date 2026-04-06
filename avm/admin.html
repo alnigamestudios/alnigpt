@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HB Admin - Patron Paneli</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .hb-orange { color: #FF6000; }
+        .bg-hb-orange { background-color: #FF6000; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden">
+        <div class="bg-hb-orange p-6 flex justify-between items-center">
+            <div>
+                <h1 class="text-white text-2xl font-bold flex items-center gap-2">
+                    <i class="ph ph-storefront"></i> Hepsibenim Yönetim
+                </h1>
+                <p class="text-orange-100 text-sm mt-1">Aşkının mağazasını yönet.</p>
+            </div>
+        </div>
+
+        <div class="flex border-b">
+            <button onclick="switchTab('products')" class="flex-1 p-4 font-bold text-gray-700 hover:bg-gray-50 border-b-2 border-orange-500" id="tab-products">Ürünler</button>
+            <button onclick="switchTab('coupons')" class="flex-1 p-4 font-bold text-gray-500 hover:bg-gray-50" id="tab-coupons">Kuponlar</button>
+        </div>
+
+        <div class="p-6">
+            
+            <div id="view-products">
+                <div class="grid gap-4 mb-8 border-b pb-8">
+                    <h2 class="font-bold text-lg">Yeni Ürün Ekle</h2>
+                    <input type="text" id="pName" class="w-full border p-3 rounded" placeholder="Ürün Adı">
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="number" id="pPrice" class="w-full border p-3 rounded" placeholder="Fiyat (TL)">
+                        <input type="file" id="pFile" multiple accept="image/*" class="w-full border p-2 rounded">
+                    </div>
+                    <textarea id="pDesc" rows="3" class="w-full border p-3 rounded" placeholder="Ürün Açıklaması"></textarea>
+                    <textarea id="pTroll" rows="2" class="w-full border p-3 rounded border-orange-200 bg-orange-50" placeholder="Troll Yorum (En üstte görünecek)"></textarea>
+                    
+                    <button onclick="uploadProduct()" class="w-full bg-hb-orange text-white font-bold py-3 rounded hover:bg-orange-600">
+                        Ürünü Yayınla
+                    </button>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-4">Yayındaki Ürünler</h3>
+                    <div id="productList" class="grid gap-4">Yükleniyor...</div>
+                </div>
+            </div>
+
+            <div id="view-coupons" class="hidden">
+                <div class="grid gap-4 mb-8 border-b pb-8">
+                    <h2 class="font-bold text-lg">Yeni Kupon Tanımla</h2>
+                    <input type="text" id="cCode" class="w-full border p-3 rounded uppercase" placeholder="KOD (Örn: SENICOKSEVIYORUM)">
+                    <input type="text" id="cMsg" class="w-full border p-3 rounded" placeholder="Kupon Mesajı (Örn: Seni seviyorum aşkım!)">
+                    <button onclick="addCoupon()" class="w-full bg-green-600 text-white font-bold py-3 rounded hover:bg-green-700">
+                        Kuponu Kaydet
+                    </button>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-4">Aktif Kuponlar</h3>
+                    <div id="couponList" class="grid gap-2">Yükleniyor...</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, push, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBe2XehydZS5XceEcINdWUJqtiWKTTxaIA",
+            authDomain: "avmm-1cd06.firebaseapp.com",
+            databaseURL: "https://avmm-1cd06-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "avmm-1cd06",
+            storageBucket: "avmm-1cd06.firebasestorage.app",
+            messagingSenderId: "674564125896",
+            appId: "1:674564125896:web:45992adb129fd3eda1e1fd"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // --- TAB GEÇİŞLERİ ---
+        window.switchTab = (tab) => {
+            document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`view-${tab}`).classList.remove('hidden');
+            
+            document.querySelectorAll('[id^="tab-"]').forEach(el => {
+                el.classList.remove('text-gray-700', 'border-b-2', 'border-orange-500');
+                el.classList.add('text-gray-500');
+            });
+            const activeBtn = document.getElementById(`tab-${tab}`);
+            activeBtn.classList.remove('text-gray-500');
+            activeBtn.classList.add('text-gray-700', 'border-b-2', 'border-orange-500');
+        }
+
+        // --- ÜRÜN YÖNETİMİ ---
+        window.uploadProduct = async function() {
+            const name = document.getElementById('pName').value;
+            const price = document.getElementById('pPrice').value;
+            const desc = document.getElementById('pDesc').value;
+            const troll = document.getElementById('pTroll').value;
+            const fileInput = document.getElementById('pFile');
+
+            if (!name || fileInput.files.length === 0) return alert("Eksik bilgi!");
+
+            const imageUrls = [];
+            // Cloudinary Upload
+            for (let file of fileInput.files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('upload_preset', 'sevgilimin_kiyafetleri'); 
+                formData.append('cloud_name', 'dfullxu4r');
+                
+                try {
+                    const res = await fetch('https://api.cloudinary.com/v1_1/dfullxu4r/image/upload', { method: 'POST', body: formData });
+                    const data = await res.json();
+                    imageUrls.push(data.secure_url);
+                } catch(e) { console.error(e); }
+            }
+
+            const newRef = push(ref(db, 'products'));
+            await set(newRef, {
+                name, price, description: desc, highlightReview: troll, images: imageUrls, timestamp: Date.now()
+            });
+            alert("Ürün Yüklendi!");
+            location.reload();
+        }
+
+        const productListRef = ref(db, 'products');
+        onValue(productListRef, (snapshot) => {
+            const listDiv = document.getElementById('productList');
+            listDiv.innerHTML = "";
+            const data = snapshot.val();
+            if(data) {
+                Object.entries(data).reverse().forEach(([key, product]) => {
+                    listDiv.innerHTML += `
+                        <div class="flex justify-between items-center bg-gray-50 p-3 rounded border">
+                            <div class="flex gap-2 items-center">
+                                <img src="${product.images ? product.images[0] : ''}" class="w-12 h-12 rounded object-cover">
+                                <span class="font-bold">${product.name}</span>
+                            </div>
+                            <button onclick="deleteItem('products/${key}')" class="text-red-500 font-bold">SİL</button>
+                        </div>
+                    `;
+                });
+            }
+        });
+
+        // --- KUPON YÖNETİMİ ---
+        window.addCoupon = async function() {
+            const code = document.getElementById('cCode').value.toUpperCase().replace(/\s/g, '');
+            const msg = document.getElementById('cMsg').value;
+            if(!code) return;
+            
+            const newRef = push(ref(db, 'coupons'));
+            await set(newRef, { code, message: msg });
+            alert("Kupon Eklendi");
+            document.getElementById('cCode').value = "";
+        }
+
+        const couponListRef = ref(db, 'coupons');
+        onValue(couponListRef, (snapshot) => {
+            const listDiv = document.getElementById('couponList');
+            listDiv.innerHTML = "";
+            const data = snapshot.val();
+            if(data) {
+                Object.entries(data).forEach(([key, cp]) => {
+                    listDiv.innerHTML += `
+                        <div class="flex justify-between bg-white border p-3 rounded">
+                            <span><b>${cp.code}</b>: ${cp.message}</span>
+                            <button onclick="deleteItem('coupons/${key}')" class="text-red-500 text-sm">Sil</button>
+                        </div>
+                    `;
+                });
+            }
+        });
+
+        window.deleteItem = (path) => {
+            if(confirm("Silmek istiyor musun?")) remove(ref(db, path));
+        }
+    </script>
+</body>
+</html>

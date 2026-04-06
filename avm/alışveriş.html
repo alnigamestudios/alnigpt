@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="tr" class="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hepsibenim</title>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        hb: '#FF6000',
+                        'hb-dark': '#E65500',
+                        dark: '#1A1A1A',
+                        'dark-card': '#242424'
+                    },
+                    fontFamily: { sans: ['Open Sans', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <style>
+        body { -webkit-tap-highlight-color: transparent; }
+        .hb-shadow { box-shadow: 0 1px 4px 0 rgba(0,0,0,0.1); }
+        .page-enter { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-dark dark:text-gray-200 text-gray-800 pb-20 transition-colors duration-300">
+
+    <header class="bg-hb sticky top-0 z-50 px-4 py-3 shadow-md flex items-center justify-between">
+        <div onclick="goHome()" class="font-extrabold text-2xl text-white tracking-tighter cursor-pointer">hepsibenim</div>
+        <div class="flex gap-4 text-white text-2xl">
+            <button onclick="toggleDarkMode()" class="focus:outline-none">
+                <i id="theme-icon" class="ph ph-moon"></i>
+            </button>
+        </div>
+    </header>
+
+    <div class="bg-hb px-4 pb-3 sticky top-[56px] z-40">
+        <div class="bg-white dark:bg-dark-card rounded flex items-center px-3 py-2.5 gap-2 text-gray-400 dark:text-gray-500 shadow-sm">
+            <i class="ph ph-magnifying-glass text-xl"></i>
+            <input id="searchInput" type="text" placeholder="Ürün ara..." class="w-full bg-transparent outline-none text-gray-700 dark:text-gray-200 text-sm">
+        </div>
+    </div>
+
+    <main id="app-container" class="p-2">
+        </main>
+
+    <nav class="fixed bottom-0 left-0 w-full bg-white dark:bg-dark-card border-t dark:border-gray-700 flex justify-around py-3 z-50 text-xs text-gray-500 dark:text-gray-400 font-semibold shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+        <button onclick="goHome()" class="flex flex-col items-center gap-1 active:text-hb hover:text-hb transition w-1/2 border-r dark:border-gray-700">
+            <i class="ph ph-house text-2xl"></i>
+            <span>Ana Sayfa</span>
+        </button>
+        <button onclick="goCart()" class="flex flex-col items-center gap-1 active:text-hb hover:text-hb transition w-1/2 relative">
+            <div id="nav-cart-badge" class="hidden absolute top-0 right-1/3 bg-hb text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">0</div>
+            <i class="ph ph-shopping-cart text-2xl"></i>
+            <span>Sepetim</span>
+        </button>
+    </nav>
+
+    <a href="https://wa.me/905550060273?text=Aşkım%20desteğe%20ihtiyacım%20var%20❤️" target="_blank" class="fixed bottom-24 right-4 z-40 bg-green-500 hover:bg-green-600 text-white p-3 rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-110">
+        <i class="ph-fill ph-whatsapp-logo text-3xl"></i>
+    </a>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, onValue, push } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBe2XehydZS5XceEcINdWUJqtiWKTTxaIA",
+            authDomain: "avmm-1cd06.firebaseapp.com",
+            databaseURL: "https://avmm-1cd06-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "avmm-1cd06",
+            storageBucket: "avmm-1cd06.firebasestorage.app",
+            messagingSenderId: "674564125896",
+            appId: "1:674564125896:web:45992adb129fd3eda1e1fd"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        
+        // --- GLOBAL STATE ---
+        let allProducts = {};
+        let allCoupons = {};
+        let cart = JSON.parse(localStorage.getItem('hb_cart')) || [];
+        let currentView = 'home';
+        let isCouponApplied = false; 
+        let currentCouponCode = ""; 
+
+        // --- DARK MODE LOGIC ---
+        window.toggleDarkMode = () => {
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                icon.classList.replace('ph-sun', 'ph-moon');
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                icon.classList.replace('ph-moon', 'ph-sun');
+            }
+        }
+        if (localStorage.getItem('theme') === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.getElementById('theme-icon').classList.replace('ph-moon', 'ph-sun');
+        }
+
+        // --- NAVIGATION ---
+        window.goHome = () => { renderHome(); window.scrollTo(0,0); }
+        window.goCart = () => { renderCart(); window.scrollTo(0,0); }
+        
+        // --- DATA FETCHING ---
+        const productsRef = ref(db, 'products');
+        onValue(productsRef, (snapshot) => {
+            allProducts = snapshot.val() || {};
+            if(currentView === 'home') renderHome();
+            updateCartBadge();
+        });
+
+        const couponsRef = ref(db, 'coupons');
+        onValue(couponsRef, (snapshot) => {
+            allCoupons = snapshot.val() || {};
+        });
+
+        // --- RENDER HOME ---
+        function renderHome() {
+            currentView = 'home';
+            const container = document.getElementById('app-container');
+            
+            let productsHTML = '';
+            Object.entries(allProducts).reverse().forEach(([key, product]) => {
+                const img = product.images ? product.images[0] : 'https://via.placeholder.com/300';
+                const price = parseFloat(product.price).toLocaleString('tr-TR');
+
+                productsHTML += `
+                <div onclick="goToDetail('${key}')" class="bg-white dark:bg-dark-card rounded-lg hb-shadow overflow-hidden flex flex-col h-full cursor-pointer border dark:border-gray-700">
+                    <div class="relative">
+                        <img src="${img}" class="w-full aspect-[3/4] object-cover">
+                        <div class="absolute bottom-2 right-2 bg-white dark:bg-dark rounded-full p-1.5 shadow">
+                            <i class="ph ph-heart text-gray-400 text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="p-3 flex-1 flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-xs text-gray-700 dark:text-gray-300 line-clamp-2 leading-tight mb-2 min-h-[32px]">${product.name}</h3>
+                            <div class="flex text-[10px] text-hb mb-1">
+                                <i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i>
+                                <span class="text-gray-400 ml-1">(254)</span>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <div class="text-lg font-bold text-gray-900 dark:text-white">${price} TL</div>
+                        </div>
+                    </div>
+                    <button onclick="event.stopPropagation(); addToCart('${key}')" class="w-full border-t dark:border-gray-700 text-hb font-bold text-sm py-2 hover:bg-orange-50 dark:hover:bg-orange-900/20">Sepete Ekle</button>
+                </div>`;
+            });
+
+            container.innerHTML = `
+                <div class="page-enter">
+                    <div class="rounded-lg overflow-hidden mb-3">
+                        <img src="https://images.hepsiburada.net/banners/s/0/672-378/bannerImage2126_20230222143806.png/format:webp" class="w-full">
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-2 pb-20">
+                        ${productsHTML || '<p class="col-span-2 text-center text-gray-500 py-10">Mağaza boş aşkım :(</p>'}
+                    </div>
+                </div>
+            `;
+            
+            // Arama
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                const val = e.target.value.toLowerCase();
+                const cards = document.querySelectorAll('.grid > div');
+                cards.forEach(card => {
+                    card.style.display = card.innerText.toLowerCase().includes(val) ? 'flex' : 'none';
+                });
+            });
+        }
+
+        // --- DETAIL PAGE ---
+        window.goToDetail = (key) => {
+            currentView = 'detail';
+            const product = allProducts[key];
+            if(!product) return;
+            const container = document.getElementById('app-container');
+            const price = parseFloat(product.price).toLocaleString('tr-TR');
+            
+            let reviewsHTML = '';
+            if(product.reviews) {
+                Object.values(product.reviews).forEach(rev => {
+                    reviewsHTML += `
+                        <div class="border-b dark:border-gray-700 py-3">
+                            <div class="flex text-hb text-xs mb-1">
+                                ${Array(rev.stars).fill('<i class="ph-fill ph-star"></i>').join('')}
+                            </div>
+                            <p class="text-sm font-semibold">${rev.title || 'Harika'}</p>
+                            <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">${rev.comment}</p>
+                            <div class="text-[10px] text-gray-400 mt-2">${new Date(rev.timestamp).toLocaleDateString()} - ${rev.user}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            const trollReview = product.highlightReview ? `
+                <div class="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-100 dark:border-orange-900 mb-4">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="bg-hb text-white text-[10px] px-1 rounded">Satıcı Yorumu</span>
+                        <div class="flex text-hb text-xs"><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i><i class="ph-fill ph-star"></i></div>
+                    </div>
+                    <p class="text-sm italic text-gray-700 dark:text-gray-300">"${product.highlightReview}"</p>
+                </div>
+            ` : '';
+
+            container.innerHTML = `
+                <div class="bg-white dark:bg-dark-card -m-2 min-h-screen pb-24 page-enter">
+                    <div class="relative">
+                        <img src="${product.images ? product.images[0] : ''}" class="w-full aspect-[3/4] object-cover">
+                        <button onclick="goHome()" class="absolute top-4 left-4 bg-white/80 dark:bg-black/50 p-2 rounded-full backdrop-blur">
+                            <i class="ph ph-arrow-left text-xl"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="p-4">
+                        <h1 class="text-lg font-semibold leading-tight text-gray-800 dark:text-white mb-2">${product.name}</h1>
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="text-2xl font-bold text-gray-900 dark:text-white">${price} TL</div>
+                            <button class="text-hb bg-orange-50 dark:bg-transparent dark:border dark:border-hb p-2 rounded-full">
+                                <i class="ph-fill ph-heart text-xl"></i>
+                            </button>
+                        </div>
+                        
+                        <div class="mb-6">
+                            <h3 class="font-bold text-sm mb-2 border-b dark:border-gray-700 pb-2">Ürün Açıklaması</h3>
+                            <p class="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">${product.description}</p>
+                        </div>
+
+                        <div class="bg-gray-50 dark:bg-dark p-4 rounded-xl">
+                            <h3 class="font-bold text-sm mb-4">Değerlendirmeler</h3>
+                            ${trollReview}
+                            <div class="mb-4">
+                                <input id="rev-title" type="text" placeholder="Başlık" class="w-full mb-2 p-2 rounded border text-sm dark:bg-dark-card dark:border-gray-700">
+                                <textarea id="rev-comment" placeholder="Yorumun..." class="w-full mb-2 p-2 rounded border text-sm dark:bg-dark-card dark:border-gray-700"></textarea>
+                                <div class="flex justify-between items-center">
+                                    <select id="rev-star" class="p-2 rounded border text-sm dark:bg-dark-card dark:border-gray-700">
+                                        <option value="5">5 Yıldız</option>
+                                        <option value="4">4 Yıldız</option>
+                                        <option value="1">1 Yıldız</option>
+                                    </select>
+                                    <button onclick="addReview('${key}')" class="bg-gray-800 text-white px-4 py-2 rounded text-xs font-bold">Gönder</button>
+                                </div>
+                            </div>
+                            <div class="space-y-2">${reviewsHTML}</div>
+                        </div>
+                    </div>
+
+                    <div class="fixed bottom-0 left-0 w-full bg-white dark:bg-dark-card p-4 border-t dark:border-gray-700 flex items-center gap-4 z-50">
+                        <div class="flex-1 text-xl font-bold text-hb text-center">${price} TL</div>
+                        <button onclick="addToCart('${key}')" class="bg-hb hover:bg-orange-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg flex-1">
+                            Sepete Ekle
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- CART PAGE ---
+        function renderCart() {
+            currentView = 'cart';
+            const container = document.getElementById('app-container');
+            
+            if(cart.length === 0) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-[60vh] text-center page-enter">
+                        <div class="bg-orange-100 dark:bg-orange-900/20 p-6 rounded-full mb-4">
+                            <i class="ph ph-shopping-cart text-4xl text-hb"></i>
+                        </div>
+                        <h2 class="font-bold text-lg mb-2">Sepetin şu an boş</h2>
+                        <button onclick="goHome()" class="bg-hb text-white py-3 px-8 rounded-lg font-bold text-sm">Alışverişe Başla</button>
+                    </div>
+                `;
+                return;
+            }
+
+            let subTotal = 0;
+            cart.forEach(item => subTotal += parseFloat(item.price));
+            
+            const totalPrice = isCouponApplied ? 0 : subTotal;
+            const discountAmount = isCouponApplied ? subTotal : 0;
+            const priceColorClass = isCouponApplied ? 'text-green-500' : 'text-hb';
+
+            let cartItemsHTML = '';
+            cart.forEach((item, index) => {
+                cartItemsHTML += `
+                    <div class="bg-white dark:bg-dark-card p-3 rounded-lg border dark:border-gray-700 flex gap-3 mb-3 shadow-sm">
+                        <img src="${item.image}" class="w-20 h-24 object-cover rounded border dark:border-gray-600">
+                        <div class="flex-1 flex flex-col justify-between">
+                            <h4 class="text-sm font-semibold line-clamp-2">${item.name}</h4>
+                            <div class="flex justify-between items-end">
+                                <div class="font-bold text-gray-900 dark:text-white">${item.price} TL</div>
+                                <button onclick="removeFromCart(${index})" class="text-gray-400 hover:text-red-500"><i class="ph ph-trash text-xl"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = `
+                <div class="page-enter pb-32">
+                    <h1 class="text-xl font-bold mb-4 px-2">Sepetim (${cart.length} Ürün)</h1>
+                    <div class="mb-6">${cartItemsHTML}</div>
+
+                    <div class="bg-white dark:bg-dark-card p-4 rounded-lg mb-4 border dark:border-gray-700">
+                        <div class="flex gap-2">
+                            <input id="couponInput" type="text" placeholder="Kupon Kodu" value="${isCouponApplied ? currentCouponCode : ''}" ${isCouponApplied ? 'disabled' : ''} class="flex-1 border dark:border-gray-600 dark:bg-dark p-2 rounded text-sm uppercase">
+                            <button onclick="applyCoupon()" class="bg-gray-800 text-white px-4 rounded text-sm font-bold" ${isCouponApplied ? 'disabled' : ''}>
+                                ${isCouponApplied ? 'Uygulandı' : 'Uygula'}
+                            </button>
+                        </div>
+                        ${isCouponApplied ? '<p class="text-green-500 text-xs mt-2">✨ Kupon başarıyla uygulandı! Aşkın sana kıyamadı.</p>' : ''}
+                    </div>
+
+                    <div class="bg-white dark:bg-dark-card p-4 rounded-lg border dark:border-gray-700">
+                        <div class="flex justify-between mb-2 text-sm">
+                            <span class="text-gray-500">Ürünler Toplamı</span>
+                            <span>${subTotal.toLocaleString('tr-TR')} TL</span>
+                        </div>
+                        <div class="flex justify-between mb-2 text-sm">
+                            <span class="text-gray-500">Kargo</span>
+                            <span class="text-gray-900 dark:text-white">Alıcı Öder</span>
+                        </div>
+                         ${isCouponApplied ? `
+                        <div class="flex justify-between mb-2 text-sm text-green-500 font-bold">
+                            <span>Aşkın İndirimi</span>
+                            <span>-${discountAmount.toLocaleString('tr-TR')} TL</span>
+                        </div>` : ''}
+                        <div class="flex justify-between text-lg font-bold border-t dark:border-gray-600 pt-3 mt-2">
+                            <span>Toplam</span>
+                            <span class="${priceColorClass}">${totalPrice.toLocaleString('tr-TR')} TL</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="fixed bottom-16 left-0 w-full bg-white dark:bg-dark-card p-4 border-t dark:border-gray-700 z-40">
+                        <button onclick="checkout(${totalPrice})" class="w-full bg-hb hover:bg-orange-600 text-white font-bold py-3 rounded-lg text-lg flex justify-center items-center gap-2">
+                        Sepeti Onayla (${totalPrice} TL) <i class="ph ph-arrow-right"></i>
+                    </button>
+                </div>
+            `;
+        }
+
+        // --- ACTIONS ---
+        window.addToCart = (key) => {
+            const product = allProducts[key];
+            const cartItem = { id: key, name: product.name, price: product.price, image: product.images ? product.images[0] : '' };
+            cart.push(cartItem);
+            localStorage.setItem('hb_cart', JSON.stringify(cart));
+            updateCartBadge();
+            const btn = event.target;
+            const oldText = btn.innerText;
+            btn.innerText = "Eklendi! ✓";
+            btn.classList.add('bg-green-500', 'text-white');
+            setTimeout(() => { btn.innerText = oldText; btn.classList.remove('bg-green-500', 'text-white'); }, 1000);
+        }
+
+        window.removeFromCart = (index) => {
+            cart.splice(index, 1);
+            localStorage.setItem('hb_cart', JSON.stringify(cart));
+            if(cart.length === 0) { isCouponApplied = false; currentCouponCode = ""; }
+            updateCartBadge();
+            renderCart();
+        }
+
+        window.addReview = async (key) => {
+            const title = document.getElementById('rev-title').value;
+            const comment = document.getElementById('rev-comment').value;
+            const star = document.getElementById('rev-star').value;
+            if(!comment) return alert("Yorum yazmadın aşkım!");
+            await push(ref(db, `products/${key}/reviews`), { user: 'Aşkın', title, comment, stars: parseInt(star), timestamp: Date.now() });
+            alert("Yorumun eklendi!");
+            goToDetail(key);
+        }
+
+        // --- KUPON MANTIĞI (Admin Panel + Hardcoded Yedek) ---
+        window.applyCoupon = () => {
+            const inputCode = document.getElementById('couponInput').value.toUpperCase().replace(/\s/g, '');
+            let found = false;
+            let couponMessage = "";
+
+            // Firebase'deki kuponları tara
+            Object.values(allCoupons).forEach(cp => {
+                if(cp.code === inputCode) {
+                    found = true;
+                    couponMessage = cp.message;
+                }
+            });
+
+            // Yedek kod
+            if(inputCode === 'ASKIMSENICOKSEVIYORUM') {
+                found = true;
+                couponMessage = "Seni çok seviyorum!";
+            }
+
+            if(found) {
+                isCouponApplied = true;
+                currentCouponCode = inputCode;
+                confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+                alert(`Kupon Başarılı: ${couponMessage} ❤️`);
+                renderCart(); 
+            } else {
+                alert("Hatalı kod! Şifreyi biliyorsun... 😉");
+            }
+        }
+
+        window.checkout = (totalPrice) => {
+            if(cart.length === 0) return;
+            
+            const phone = "905550060273";
+            let msg = `*YENİ SİPARİŞ!* 🛍️\n\n`;
+            
+            cart.forEach((item, i) => {
+                msg += `${i+1}. *${item.name}* - ${item.price} TL\n`;
+            });
+            
+            msg += `\n------------------\n`;
+            
+            if (isCouponApplied) {
+                 msg += `✅ *Durum:* Kupon Kullandı (Bedava)\n`;
+                 msg += `💖 *Kupon:* ${currentCouponCode}\n`;
+                 msg += `💰 *Ödenecek:* 0 TL\n`;
+            } else {
+                 msg += `❌ *Durum:* Kupon KULLANMADI\n`;
+                 msg += `💰 *Ödenecek:* ${totalPrice} TL (Borç Yazıldı)\n`;
+            }
+
+            msg += `📅 *Tarih:* ${new Date().toLocaleDateString()}\n`;
+            msg += `\n_Hemen kargola lütfen!_`;
+
+            cart = [];
+            isCouponApplied = false;
+            currentCouponCode = "";
+            localStorage.setItem('hb_cart', JSON.stringify([]));
+            updateCartBadge();
+            
+            window.location.href = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+        }
+
+        function updateCartBadge() {
+            const badge = document.getElementById('nav-cart-badge');
+            if(cart.length > 0) { badge.innerText = cart.length; badge.classList.remove('hidden'); } 
+            else { badge.classList.add('hidden'); }
+        }
+
+        updateCartBadge();
+        renderHome();
+    </script>
+</body>
+</html>
